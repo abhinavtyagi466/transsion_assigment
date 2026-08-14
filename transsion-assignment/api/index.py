@@ -42,9 +42,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Data directory setup ──────────────────────────────────────────────────────
-DATA_DIR = Path(__file__).parent.parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+# ── Data directory setup (Vercel read-only safe) ──────────────────────────────
+if os.environ.get("VERCEL"):
+    DATA_DIR = Path("/tmp/data")
+else:
+    DATA_DIR = Path(__file__).parent.parent / "data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    logger.warning(f"Data directory note: {e}")
+
 LOCAL_FILE = DATA_DIR / "interviews.json"
 
 
@@ -165,6 +173,7 @@ class AnalyzeRequest(BaseModel):
 # ── MODULE 1 ENDPOINTS ────────────────────────────────────────────────────────
 
 @app.post("/api/interview")
+@app.post("/interview")
 async def interview(body: InterviewRequest):
     """Accepts conversation history [{role, text}], returns next question."""
     api_key = _get_api_key()
@@ -240,6 +249,7 @@ async def interview(body: InterviewRequest):
 
 
 @app.post("/api/tts")
+@app.post("/tts")
 async def generate_tts(body: TTSRequest):
     """Generates TTS audio via Murf AI API."""
     if not body.text.strip():
@@ -285,6 +295,7 @@ async def generate_tts(body: TTSRequest):
 
 
 @app.post("/api/summarize")
+@app.post("/summarize")
 async def summarize(body: SummarizeRequest):
     """Generates summary + saves transcript to DB under user_name."""
     api_key = _get_api_key()
@@ -368,6 +379,7 @@ Return ONLY valid JSON, no markdown fences, no extra text."""
 
 
 @app.post("/api/admin/login")
+@app.post("/admin/login")
 async def admin_login(body: AdminLoginRequest):
     expected_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
     if body.password != expected_pass:
@@ -376,6 +388,7 @@ async def admin_login(body: AdminLoginRequest):
 
 
 @app.get("/api/admin/transcripts")
+@app.get("/admin/transcripts")
 async def get_admin_transcripts():
     interviews = _get_all_interviews()
     return {"interviews": interviews}
@@ -384,6 +397,7 @@ async def get_admin_transcripts():
 # ── MODULE 2 ENDPOINTS ────────────────────────────────────────────────────────
 
 @app.post("/api/analyze")
+@app.post("/analyze")
 async def analyze_sentiment(body: AnalyzeRequest):
     """Aspect-level sentiment analysis endpoint for product reviews."""
     api_key = _get_api_key()
