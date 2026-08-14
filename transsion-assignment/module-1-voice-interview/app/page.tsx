@@ -6,90 +6,114 @@
  * Flow:
  *  1. User clicks "Start Interview"
  *  2. Browser requests mic permission
- *  3. Frontend calls GET /api/token → receives ephemeral token
- *  4. Frontend opens WebSocket to Gemini Live using that token
- *  5. Audio is streamed; incoming transcripts shown in real-time
- *  6. User clicks "Stop Interview"
- *  7. Frontend POSTs full transcript to POST /api/summarize
- *  8. Summary + themes rendered below transcript
+ *  3. Interviewer greets & asks user's name first via Gemini + Murf TTS
+ *  4. User speaks → Browser SpeechRecognition → text
+ *  5. Text sent to POST /api/interview → Gemini responds with next sequence question
+ *  6. Response spoken via POST /api/tts → Murf AI
+ *  7. User clicks "Stop Interview"
+ *  8. Frontend POSTs full transcript to POST /api/summarize
+ *  9. Summary + themes rendered & saved to Supabase under "Transcript for {user_name}"
+ * 10. Admin Dashboard lets admins log in and view all user transcripts
  */
 
 import { useRef, useState, useCallback } from "react";
 
 /* ── Types ─────────────────────────────────────────────── */
 type Turn = { role: "user" | "assistant"; text: string };
-type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
+type SessionState = "idle" | "listening" | "thinking" | "speaking" | "closed" | "error";
 
 interface SummaryResult {
+  user_name: string;
   summary: string;
   themes: string[];
 }
 
-/* ── Gemini Live constants ─────────────────────────────── */
-// Gemini Live WebSocket endpoint (token-authenticated)
-const GEMINI_LIVE_WS_BASE =
-  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
-
-const SAMPLE_RATE = 16000; // Hz required by Gemini Live
-
-/* ── Helper — encode PCM Float32 → Int16 Base64 ─────────── */
-function float32ToInt16Base64(buffer: Float32Array): string {
-  const int16 = new Int16Array(buffer.length);
-  for (let i = 0; i < buffer.length; i++) {
-    const s = Math.max(-1, Math.min(1, buffer[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  const bytes = new Uint8Array(int16.buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+interface SavedInterview {
+  id: string;
+  user_name: string;
+  transcript: Turn[];
+  summary: string;
+  themes: string[];
+  created_at: string;
 }
 
-/* ── Helper — decode Base64 audio from Gemini → PCM ──────── */
-function base64ToFloat32(b64: string): Float32Array<ArrayBuffer> {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const int16 = new Int16Array(bytes.buffer as ArrayBuffer);
-  const buf = new ArrayBuffer(int16.length * 4);
-  const float32 = new Float32Array(buf);
-  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768.0;
-  return float32;
+/* ── SpeechRecognition types ──────────────────────────── */
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
 }
 
 /* ── Component ─────────────────────────────────────────── */
 export default function VoiceInterviewPage() {
-  const [connState, setConnState] = useState<ConnectionState>("idle");
+  const [sessionState, setSessionState] = useState<SessionState>("idle");
   const [transcript, setTranscript] = useState<Turn[]>([]);
+  const [interimText, setInterimText] = useState("");
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Refs so callbacks always have current values
-  const wsRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  // Admin Dashboard State
+  const [isAdminView, setIsAdminView] = useState(false);
+  const [adminAuth, setAdminAuth] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [savedInterviews, setSavedInterviews] = useState<SavedInterview[]>([]);
+  const [loadingTranscripts, setLoadingTranscripts] = useState(false);
+  const [expandedInterviewId, setExpandedInterviewId] = useState<string | null>(null);
+
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const transcriptRef = useRef<Turn[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const isActiveRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isProcessingRef = useRef(false);
 
-  // Keep transcriptRef in sync
-  const addTurn = useCallback((turn: Turn) => {
-    setTranscript((prev) => {
-      const next = [...prev, turn];
-      transcriptRef.current = next;
-      return next;
-    });
+  // Keep transcriptRef in sync synchronously and return updated array
+  const addTurn = useCallback((turn: Turn): Turn[] => {
+    const next = [...transcriptRef.current, turn];
+    transcriptRef.current = next;
+    setTranscript(next);
     setTimeout(() => {
       transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 50);
+    return next;
   }, []);
 
-  // Helper to play Assistant response using Murf AI TTS API
-  const speakWithMurf = useCallback(async (text: string) => {
+  /* ── Speak text using Murf AI TTS ────────────────────── */
+  const speakWithMurf = useCallback(async (text: string): Promise<void> => {
     try {
+      setSessionState("speaking");
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -98,8 +122,19 @@ export default function VoiceInterviewPage() {
       if (res.ok) {
         const { audio_url } = await res.json();
         if (audio_url) {
-          const audio = new Audio(audio_url);
-          audio.play().catch((e) => console.log("Murf TTS playback info:", e));
+          return new Promise<void>((resolve) => {
+            const audio = new Audio(audio_url);
+            audioRef.current = audio;
+            audio.onended = () => {
+              audioRef.current = null;
+              resolve();
+            };
+            audio.onerror = () => {
+              audioRef.current = null;
+              resolve();
+            };
+            audio.play().catch(() => resolve());
+          });
         }
       }
     } catch (err) {
@@ -107,224 +142,152 @@ export default function VoiceInterviewPage() {
     }
   }, []);
 
+  /* ── Get interviewer response from Gemini ─────────────── */
+  const getInterviewerResponse = useCallback(async (conversation: Turn[]): Promise<string | null> => {
+    try {
+      setSessionState("thinking");
+      const res = await fetch("/api/interview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation }),
+      });
+      if (res.ok) {
+        const { response } = await res.json();
+        return response;
+      }
+      return null;
+    } catch (err) {
+      console.error("Interview API error:", err);
+      return null;
+    }
+  }, []);
+
+  /* ── Start listening for user speech ──────────────────── */
+  const startListening = useCallback(() => {
+    if (!isActiveRef.current) return;
+
+    const SpeechRecognition =
+      (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionInstance }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionInstance }).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setError("Your browser does not support Speech Recognition. Please use Chrome.");
+      setSessionState("error");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => {
+      setSessionState("listening");
+      setInterimText("");
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
+      let finalText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalText += result[0].transcript;
+        } else {
+          interim += result[0].transcript;
+        }
+      }
+
+      if (interim) setInterimText(interim);
+
+      if (finalText.trim() && !isProcessingRef.current) {
+        isProcessingRef.current = true;
+        setInterimText("");
+        try {
+          recognition.stop();
+        } catch (_) {}
+
+        const userTurn: Turn = { role: "user", text: finalText.trim() };
+        const updatedConversation = addTurn(userTurn);
+
+        // Get interviewer response using the updated conversation array
+        getInterviewerResponse(updatedConversation).then(async (response) => {
+          if (response && isActiveRef.current) {
+            const assistantTurn: Turn = { role: "assistant", text: response };
+            addTurn(assistantTurn);
+            await speakWithMurf(response);
+          }
+          isProcessingRef.current = false;
+          // After speaking, listen again
+          if (isActiveRef.current) {
+            startListening();
+          }
+        }).catch(() => {
+          isProcessingRef.current = false;
+        });
+      }
+    };
+
+    recognition.onerror = (event: { error: string }) => {
+      if (event.error === "no-speech" && isActiveRef.current && !isProcessingRef.current) {
+        // No speech detected, restart listening
+        setTimeout(() => {
+          if (isActiveRef.current && !isProcessingRef.current) startListening();
+        }, 300);
+        return;
+      }
+      if (event.error === "aborted") return;
+      console.error("Speech recognition error:", event.error);
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if session is still active and we're not processing AI response
+    };
+
+    recognition.start();
+  }, [addTurn, getInterviewerResponse, speakWithMurf]);
+
   /* ── 1. Start Interview ─────────────────────────────────── */
   const startInterview = useCallback(async () => {
     setError(null);
     setSummary(null);
     setTranscript([]);
     transcriptRef.current = [];
-    setConnState("connecting");
+    isProcessingRef.current = false;
+    isActiveRef.current = true;
+    setSessionState("thinking");
 
-    try {
-      // a) Fetch ephemeral token from our API (never exposes raw key to browser)
-      const tokenRes = await fetch("/api/token");
-      if (!tokenRes.ok) throw new Error("Failed to get token from /api/token");
-      const { token } = await tokenRes.json();
-
-      // b) Request mic
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // c) Open Gemini Live WebSocket
-      const wsUrl = `${GEMINI_LIVE_WS_BASE}?key=${token}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = async () => {
-        setConnState("open");
-
-        // Send setup message
-        ws.send(
-          JSON.stringify({
-            setup: {
-              model: "models/gemini-2.0-flash-live-001",
-              generation_config: {
-                response_modalities: ["AUDIO", "TEXT"],
-                speech_config: {
-                  voice_config: {
-                    prebuilt_voice_config: { voice_name: "Aoede" },
-                  },
-                },
-              },
-              system_instruction: {
-                parts: [
-                  {
-                    text: "You are a professional interviewer conducting a voice interview. Ask clear, relevant questions. Listen carefully to answers and respond naturally.",
-                  },
-                ],
-              },
-            },
-          })
-        );
-
-        // d) Wire up microphone audio → WebSocket using AudioWorkletNode (replaces deprecated ScriptProcessorNode)
-        const AudioContextClass =
-          window.AudioContext || (window as unknown as { webkitAudioContext: typeof window.AudioContext }).webkitAudioContext;
-        const audioCtx = new AudioContextClass({ sampleRate: SAMPLE_RATE });
-        audioCtxRef.current = audioCtx;
-
-        const source = audioCtx.createMediaStreamSource(stream);
-
-        if (audioCtx.audioWorklet) {
-          try {
-            const workletCode = `
-              class AudioInputProcessor extends AudioWorkletProcessor {
-                process(inputs) {
-                  const input = inputs[0];
-                  if (input && input[0]) {
-                    this.port.postMessage(new Float32Array(input[0]));
-                  }
-                  return true;
-                }
-              }
-              registerProcessor('audio-input-processor', AudioInputProcessor);
-            `;
-            const blob = new Blob([workletCode], { type: 'application/javascript' });
-            const workletUrl = URL.createObjectURL(blob);
-            await audioCtx.audioWorklet.addModule(workletUrl);
-            const workletNode = new AudioWorkletNode(audioCtx, 'audio-input-processor');
-            
-            workletNode.port.onmessage = (e) => {
-              if (ws.readyState !== WebSocket.OPEN) return;
-              const pcm = e.data;
-              const b64 = float32ToInt16Base64(pcm);
-              ws.send(
-                JSON.stringify({
-                  realtime_input: {
-                    media_chunks: [
-                      { mime_type: "audio/pcm;rate=16000", data: b64 },
-                    ],
-                  },
-                })
-              );
-            };
-
-            source.connect(workletNode);
-            workletNode.connect(audioCtx.destination);
-          } catch {
-            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-            processorRef.current = processor;
-            processor.onaudioprocess = (evt) => {
-              if (ws.readyState !== WebSocket.OPEN) return;
-              const pcm = evt.inputBuffer.getChannelData(0);
-              const b64 = float32ToInt16Base64(pcm);
-              ws.send(
-                JSON.stringify({
-                  realtime_input: {
-                    media_chunks: [
-                      { mime_type: "audio/pcm;rate=16000", data: b64 },
-                    ],
-                  },
-                })
-              );
-            };
-            source.connect(processor);
-            processor.connect(audioCtx.destination);
-          }
-        } else {
-          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-          processorRef.current = processor;
-          processor.onaudioprocess = (evt) => {
-            if (ws.readyState !== WebSocket.OPEN) return;
-            const pcm = evt.inputBuffer.getChannelData(0);
-            const b64 = float32ToInt16Base64(pcm);
-            ws.send(
-              JSON.stringify({
-                realtime_input: {
-                  media_chunks: [
-                    { mime_type: "audio/pcm;rate=16000", data: b64 },
-                  ],
-                },
-              })
-            );
-          };
-          source.connect(processor);
-          processor.connect(audioCtx.destination);
-        }
-      };
-
-      // e) Handle incoming messages
-      ws.onmessage = async (event) => {
-        try {
-          const data =
-            event.data instanceof Blob
-              ? JSON.parse(await event.data.text())
-              : JSON.parse(event.data);
-
-          // Text transcript
-          const parts =
-            data?.serverContent?.modelTurn?.parts ??
-            data?.serverContent?.outputTranscription?.parts ??
-            [];
-          for (const part of parts) {
-            if (part.text?.trim()) {
-              const assistantText = part.text.trim();
-              addTurn({ role: "assistant", text: assistantText });
-              speakWithMurf(assistantText);
-            }
-          }
-
-          // Input transcription (user speech → text)
-          const userParts =
-            data?.serverContent?.inputTranscription?.parts ?? [];
-          for (const part of userParts) {
-            if (part.text?.trim()) {
-              addTurn({ role: "user", text: part.text.trim() });
-            }
-          }
-
-          // Audio response — play it back
-          const audioParts =
-            data?.serverContent?.modelTurn?.parts ?? [];
-          for (const part of audioParts) {
-            if (part.inlineData?.mimeType?.startsWith("audio/")) {
-              const float32 = base64ToFloat32(part.inlineData.data);
-              if (audioCtxRef.current) {
-                const buffer = audioCtxRef.current.createBuffer(
-                  1,
-                  float32.length,
-                  SAMPLE_RATE
-                );
-                buffer.copyToChannel(float32, 0);
-                const src = audioCtxRef.current.createBufferSource();
-                src.buffer = buffer;
-                src.connect(audioCtxRef.current.destination);
-                src.start();
-              }
-            }
-          }
-        } catch {
-          // Non-JSON or unparseable frame — ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnState("error");
-        setError("WebSocket error — check console for details.");
-      };
-
-      ws.onclose = () => {
-        setConnState((prev) => (prev === "open" ? "closed" : prev));
-      };
-    } catch (err: unknown) {
-      setConnState("error");
-      setError(err instanceof Error ? err.message : String(err));
+    // Get initial greeting from interviewer (asks name first)
+    const greeting = await getInterviewerResponse([]);
+    if (greeting) {
+      const greetingTurn: Turn = { role: "assistant", text: greeting };
+      addTurn(greetingTurn);
+      await speakWithMurf(greeting);
+      // Start listening after greeting
+      if (isActiveRef.current) {
+        startListening();
+      }
+    } else {
+      setError("Could not connect to interview service.");
+      setSessionState("error");
+      isActiveRef.current = false;
     }
-  }, [addTurn]);
+  }, [addTurn, getInterviewerResponse, speakWithMurf, startListening]);
 
   /* ── 2. Stop Interview ──────────────────────────────────── */
   const stopInterview = useCallback(async () => {
-    // Close mic + WebSocket
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-    audioCtxRef.current?.close();
-    audioCtxRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    wsRef.current?.close();
-    wsRef.current = null;
+    isActiveRef.current = false;
+    isProcessingRef.current = false;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
 
-    setConnState("closed");
+    setSessionState("closed");
 
     // POST transcript to /api/summarize
     const turns = transcriptRef.current;
@@ -350,14 +313,51 @@ export default function VoiceInterviewPage() {
     }
   }, []);
 
+  /* ── Admin Login & Fetching ──────────────────────────────── */
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError(null);
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminPassword }),
+      });
+      if (res.ok) {
+        setAdminAuth(true);
+        fetchSavedTranscripts();
+      } else {
+        setAdminError("Invalid admin password. (Default: admin123)");
+      }
+    } catch {
+      setAdminError("Could not authenticate admin.");
+    }
+  };
+
+  const fetchSavedTranscripts = async () => {
+    setLoadingTranscripts(true);
+    try {
+      const res = await fetch("/api/admin/transcripts");
+      if (res.ok) {
+        const data = await res.json();
+        setSavedInterviews(data.interviews || []);
+      }
+    } catch (err) {
+      console.error("Error fetching admin transcripts:", err);
+    } finally {
+      setLoadingTranscripts(false);
+    }
+  };
+
   /* ── Derived state ──────────────────────────────────────── */
-  const isActive = connState === "open" || connState === "connecting";
-  const stateLabels: Record<ConnectionState, string> = {
+  const isActive = sessionState === "listening" || sessionState === "thinking" || sessionState === "speaking";
+  const stateLabels: Record<SessionState, string> = {
     idle: "Idle — ready to start",
-    connecting: "Connecting to Gemini Live…",
-    open: "Connected — interview in progress",
+    listening: "🎙 Listening to you…",
+    thinking: "🤔 Interviewer is thinking…",
+    speaking: "🔊 Interviewer is speaking…",
     closed: "Session ended",
-    error: "Connection error",
+    error: "Error occurred",
   };
 
   /* ── Render ─────────────────────────────────────────────── */
@@ -365,96 +365,215 @@ export default function VoiceInterviewPage() {
     <main className="page">
       <header className="header">
         <h1>🎙 Voice Interview Assistant</h1>
-        <p>Powered by Gemini Live · speak naturally and get a full summary</p>
+        <p>Speak naturally · AI interviewer powered by Gemini 3.1 Flash-Lite + Murf TTS</p>
+        <button
+          className="admin-toggle-btn"
+          onClick={() => {
+            setIsAdminView(!isAdminView);
+            if (!isAdminView && adminAuth) fetchSavedTranscripts();
+          }}
+        >
+          {isAdminView ? "← Back to Interview" : "🔐 Admin Dashboard & Transcripts"}
+        </button>
       </header>
 
-      {/* Status bar */}
-      <div className="status-bar" role="status" aria-live="polite">
-        <span className={`status-dot ${connState}`} aria-hidden="true" />
-        <span className="status-label">Connection:</span>
-        <span className="status-value">{stateLabels[connState]}</span>
-      </div>
-
-      {/* Controls */}
-      <div className="controls">
-        <button
-          id="btn-start-interview"
-          className="btn btn-start"
-          onClick={startInterview}
-          disabled={isActive}
-          aria-label="Start interview session"
-        >
-          {connState === "connecting" ? (
-            <>
-              <span className="spinner" />
-              Connecting…
-            </>
+      {/* ── ADMIN VIEW ───────────────────────────────────────── */}
+      {isAdminView ? (
+        <section className="admin-container" aria-label="Admin Dashboard">
+          {!adminAuth ? (
+            <div className="admin-login-box">
+              <h2>🔒 Admin Authentication</h2>
+              <p>Enter the admin password to view user transcripts saved in Supabase.</p>
+              <form onSubmit={handleAdminLogin}>
+                <input
+                  type="password"
+                  placeholder="Enter admin password (admin123)"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="admin-input"
+                  required
+                />
+                <button type="submit" className="btn btn-start" style={{ width: "100%", justifyContent: "center" }}>
+                  Unlock Admin Dashboard
+                </button>
+              </form>
+              {adminError && <p className="error-msg" style={{ marginTop: 12 }}>⚠ {adminError}</p>}
+            </div>
           ) : (
-            "▶ Start Interview"
-          )}
-        </button>
-
-        <button
-          id="btn-stop-interview"
-          className="btn btn-stop"
-          onClick={stopInterview}
-          disabled={!isActive}
-          aria-label="Stop interview session and generate summary"
-        >
-          ⏹ Stop &amp; Summarize
-        </button>
-      </div>
-
-      {/* Error message */}
-      {error && (
-        <p className="error-msg" role="alert">
-          ⚠ {error}
-        </p>
-      )}
-
-      {/* Live transcript */}
-      <section
-        className="transcript-panel"
-        aria-label="Live interview transcript"
-      >
-        {transcript.map((turn, i) => (
-          <div key={i} className={`turn ${turn.role}`}>
-            <span className={`turn-role ${turn.role}`}>
-              {turn.role === "user" ? "You" : "Interviewer"}
-            </span>
-            <p className="turn-text">{turn.text}</p>
-          </div>
-        ))}
-        <div ref={transcriptEndRef} />
-      </section>
-
-      {/* Post-interview summary */}
-      {summaryLoading && (
-        <div className="summary-panel">
-          <p className="status-label">
-            <span className="spinner" style={{ marginRight: 8 }} />
-            Generating summary…
-          </p>
-        </div>
-      )}
-
-      {summary && !summaryLoading && (
-        <section className="summary-panel" aria-label="Interview summary">
-          <h2>📋 Interview Summary</h2>
-          <p className="summary-text">{summary.summary}</p>
-          {summary.themes.length > 0 && (
-            <>
-              <h2 style={{ marginBottom: 10 }}>🏷 Key Themes</h2>
-              <div className="themes-list">
-                {summary.themes.map((theme, i) => (
-                  <span key={i} className="theme-tag">
-                    {theme}
-                  </span>
-                ))}
+            <div className="admin-transcripts-box">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <h2>📁 Saved User Transcripts ({savedInterviews.length})</h2>
+                <button className="btn" onClick={fetchSavedTranscripts} style={{ padding: "6px 14px", fontSize: "0.85rem", background: "var(--surface-alt)" }}>
+                  🔄 Refresh
+                </button>
               </div>
-            </>
+
+              {loadingTranscripts ? (
+                <p className="status-label">
+                  <span className="spinner" style={{ marginRight: 8 }} /> Loading saved transcripts from Supabase…
+                </p>
+              ) : savedInterviews.length === 0 ? (
+                <p style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No saved user transcripts yet. Complete an interview to see it here!</p>
+              ) : (
+                <div className="transcripts-list">
+                  {savedInterviews.map((item) => {
+                    const isExpanded = expandedInterviewId === item.id;
+                    const formattedDate = new Date(item.created_at || Date.now()).toLocaleString();
+
+                    return (
+                      <div key={item.id} className="transcript-card">
+                        <div
+                          className="transcript-card-header"
+                          onClick={() => setExpandedInterviewId(isExpanded ? null : item.id)}
+                        >
+                          <div>
+                            <h3 style={{ fontSize: "1.05rem", color: "#58a6ff" }}>
+                              Transcript for {item.user_name || "Participant"}
+                            </h3>
+                            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{formattedDate}</span>
+                          </div>
+                          <span style={{ fontSize: "1.2rem", color: "var(--text-secondary)" }}>
+                            {isExpanded ? "▲" : "▼"}
+                          </span>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="transcript-card-body">
+                            <div className="summary-section">
+                              <h4 style={{ color: "#3fb950", marginBottom: 6 }}>Summary</h4>
+                              <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: 12 }}>{item.summary}</p>
+
+                              {item.themes && item.themes.length > 0 && (
+                                <div className="themes-list" style={{ marginBottom: 16 }}>
+                                  {item.themes.map((t, idx) => (
+                                    <span key={idx} className="theme-tag">{t}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <h4 style={{ color: "#58a6ff", marginBottom: 8 }}>Full Dialogue Transcript</h4>
+                            <div className="transcript-dialogue">
+                              {item.transcript && item.transcript.map((t, idx) => (
+                                <div key={idx} className={`turn ${t.role}`} style={{ marginBottom: 8 }}>
+                                  <span className={`turn-role ${t.role}`}>
+                                    {t.role === "user" ? item.user_name || "User" : "Interviewer"}
+                                  </span>
+                                  <p className="turn-text" style={{ fontSize: "0.88rem" }}>{t.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </section>
+      ) : (
+        /* ── INTERVIEW VIEW ──────────────────────────────────── */
+        <>
+          {/* Status bar */}
+          <div className="status-bar" role="status" aria-live="polite">
+            <span className={`status-dot ${sessionState}`} aria-hidden="true" />
+            <span className="status-label">Status:</span>
+            <span className="status-value">{stateLabels[sessionState]}</span>
+          </div>
+
+          {/* Controls */}
+          <div className="controls">
+            <button
+              id="btn-start-interview"
+              className="btn btn-start"
+              onClick={startInterview}
+              disabled={isActive}
+              aria-label="Start interview session"
+            >
+              {sessionState === "thinking" && transcript.length === 0 ? (
+                <>
+                  <span className="spinner" />
+                  Starting…
+                </>
+              ) : (
+                "▶ Start Interview"
+              )}
+            </button>
+
+            <button
+              id="btn-stop-interview"
+              className="btn btn-stop"
+              onClick={stopInterview}
+              disabled={!isActive}
+              aria-label="Stop interview session and generate summary"
+            >
+              ⏹ Stop &amp; Summarize
+            </button>
+          </div>
+
+          {/* Error message */}
+          {error && (
+            <p className="error-msg" role="alert">
+              ⚠ {error}
+            </p>
+          )}
+
+          {/* Live transcript */}
+          <section
+            className="transcript-panel"
+            aria-label="Live interview transcript"
+          >
+            {transcript.map((turn, i) => (
+              <div key={i} className={`turn ${turn.role}`}>
+                <span className={`turn-role ${turn.role}`}>
+                  {turn.role === "user" ? "You" : "Interviewer"}
+                </span>
+                <p className="turn-text">{turn.text}</p>
+              </div>
+            ))}
+            {interimText && (
+              <div className="turn user interim">
+                <span className="turn-role user">You</span>
+                <p className="turn-text">{interimText}…</p>
+              </div>
+            )}
+            <div ref={transcriptEndRef} />
+          </section>
+
+          {/* Post-interview summary */}
+          {summaryLoading && (
+            <div className="summary-panel">
+              <p className="status-label">
+                <span className="spinner" style={{ marginRight: 8 }} />
+                Generating summary &amp; saving to Supabase…
+              </p>
+            </div>
+          )}
+
+          {summary && !summaryLoading && (
+            <section className="summary-panel" aria-label="Interview summary">
+              <h2>📋 Interview Summary ({summary.user_name || "Participant"})</h2>
+              <p className="summary-text">{summary.summary}</p>
+              {summary.themes.length > 0 && (
+                <>
+                  <h2 style={{ marginBottom: 10 }}>🏷 Key Themes</h2>
+                  <div className="themes-list">
+                    {summary.themes.map((theme, i) => (
+                      <span key={i} className="theme-tag">
+                        {theme}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+              <p style={{ marginTop: 16, fontSize: "0.82rem", color: "#3fb950" }}>
+                ✓ Transcript saved to database for {summary.user_name || "Participant"}.
+              </p>
+            </section>
+          )}
+        </>
       )}
     </main>
   );
