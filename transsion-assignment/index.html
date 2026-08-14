@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transsion Assignment Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      background: #000000;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3.5rem;
+      padding: 2rem;
+    }
+
+    .header {
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #ffffff;
+      margin-bottom: 0.5rem;
+    }
+
+    p.subtitle {
+      color: #888888;
+      font-size: 0.95rem;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 2.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 280px;
+      height: 240px;
+      border: 1px solid #333333;
+      border-radius: 16px;
+      background: #090909;
+      color: #ffffff;
+      text-decoration: none;
+      transition: all 0.2s ease-in-out;
+      cursor: pointer;
+      gap: 1rem;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    .btn:hover {
+      border-color: #ffffff;
+      background: #141414;
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-icon {
+      font-size: 3rem;
+      line-height: 1;
+    }
+
+    .btn-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: #ffffff;
+    }
+
+    .btn-port {
+      font-size: 0.8rem;
+      color: #666666;
+      font-family: monospace;
+      background: #111111;
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #222222;
+    }
+
+    .btn:hover .btn-port {
+      color: #aaaaaa;
+      border-color: #444444;
+    }
+
+    footer {
+      color: #444444;
+      font-size: 0.8rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Transsion Monorepo Portal</h1>
+    <p class="subtitle">Select a module to launch interface</p>
+  </div>
+
+  <div class="buttons">
+    <a href="http://localhost:3000" target="_blank" class="btn" id="btn-survey-agent">
+      <span class="btn-icon">🎙</span>
+      <span class="btn-title">Survey Agent</span>
+      <span class="btn-port">http://localhost:3000</span>
+    </a>
+
+    <a href="http://localhost:3001" target="_blank" class="btn" id="btn-sentiment-bot">
+      <span class="btn-icon">🔍</span>
+      <span class="btn-title">Sentiment Analysis Bot</span>
+      <span class="btn-port">http://localhost:3001</span>
+    </a>
+  </div>
+
+  <footer>Module 1 (:3000) &bull; Module 2 (:3001)</footer>
+
+</body>
+</html>

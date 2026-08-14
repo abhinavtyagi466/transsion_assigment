@@ -1,0 +1,23 @@
+{
+  "name": "transsion-assignment",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "module-1-voice-interview",
+    "module-2-sentiment-chatbot"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n PORTAL,M1-API,M1-WEB,M2-API,M2-WEB -c yellow,blue,cyan,magenta,green \"npm run dev:portal\" \"npm run dev:m1-api\" \"npm run dev:m1-web\" \"npm run dev:m2-api\" \"npm run dev:m2-web\"",
+    "dev:portal": "node server.js",
+    "dev:m1-api": "dotenv -e module-1-voice-interview/.env.local -- python -m uvicorn api.index:app --reload --port 8000 --app-dir module-1-voice-interview",
+    "dev:m1-web": "npm run dev -w module-1-voice-interview",
+    "dev:m2-api": "dotenv -e module-2-sentiment-chatbot/.env.local -- python -m uvicorn api.index:app --reload --port 8001 --app-dir module-2-sentiment-chatbot",
+    "dev:m2-web": "npm run dev -w module-2-sentiment-chatbot",
+    "install:python": "pip install -r module-1-voice-interview/api/requirements.txt && pip install -r module-2-sentiment-chatbot/api/requirements.txt",
+    "build": "npm run build -w module-1-voice-interview && npm run build -w module-2-sentiment-chatbot"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "dotenv-cli": "^7.0.0"
+  }
+}

@@ -1,6 +1,6 @@
 # Transsion Assignment — Monorepo
 
-Two independent AI-powered web modules, each a Next.js 14 + FastAPI hybrid app.
+Two independent AI-powered web modules, each a Next.js 14 + FastAPI hybrid app, managed as an **npm workspaces** monorepo.
 
 | Module | Description | Frontend | FastAPI |
 |--------|-------------|----------|---------|
@@ -13,17 +13,21 @@ Two independent AI-powered web modules, each a Next.js 14 + FastAPI hybrid app.
 
 ```
 transsion-assignment/
+  package.json          ← npm workspaces root + dev scripts
+  index.html            ← portal page linking to both modules
   module-1-voice-interview/
-    app/            ← Next.js App Router (TypeScript)
-    api/            ← FastAPI (Python)
-    next.config.js  ← rewrites /api/* → localhost:8000 (local dev)
-    vercel.json     ← rewrites /api/* → api/index.py (production)
+    app/                ← Next.js App Router (TypeScript)
+    api/                ← FastAPI (Python)
+    next.config.js      ← rewrites /api/* → localhost:8000 (local dev)
+    vercel.json         ← rewrites /api/* → api/index.py (production)
+    package.json
   module-2-sentiment-chatbot/
     app/
     api/
-    next.config.js  ← rewrites /api/* → localhost:8001 (local dev)
+    next.config.js      ← rewrites /api/* → localhost:8001 (local dev)
     vercel.json
-  run-dev.sh        ← starts all 4 processes locally
+    package.json
+  node_modules/         ← shared (hoisted by npm workspaces)
   README.md
 ```
 
@@ -35,18 +39,19 @@ transsion-assignment/
 
 - **Node.js** ≥ 18 + npm
 - **Python** ≥ 3.9 + pip
-- A **Gemini API key** (get one at [aistudio.google.com](https://aistudio.google.com))
+- A **Gemini API key** ([aistudio.google.com](https://aistudio.google.com))
 
 ### 2. Install dependencies
 
 ```bash
-# Python (run once per module, or share a venv)
+# Node (single install at root — workspaces hoist everything)
+npm install
+
+# Python
+npm run install:python
+# or manually:
 pip install -r module-1-voice-interview/api/requirements.txt
 pip install -r module-2-sentiment-chatbot/api/requirements.txt
-
-# Node
-cd module-1-voice-interview && npm install && cd ..
-cd module-2-sentiment-chatbot && npm install && cd ..
 ```
 
 ### 3. Set up environment variables
@@ -70,73 +75,57 @@ cp module-2-sentiment-chatbot/.env.local.example module-2-sentiment-chatbot/.env
 ### 4. Run everything
 
 ```bash
-chmod +x run-dev.sh
-./run-dev.sh
+npm run dev
 ```
 
-This starts four processes and prints:
+That's it. This single command starts all four processes:
 
 ```
-Module 1 — Voice Interview Assistant
-  Frontend :  http://localhost:3000
-  FastAPI  :  http://localhost:8000
-
-Module 2 — Sentiment Chatbot
-  Frontend :  http://localhost:3001
-  FastAPI  :  http://localhost:8001
+[M1-API] FastAPI → http://localhost:8000
+[M1-WEB] Next.js → http://localhost:3000
+[M2-API] FastAPI → http://localhost:8001
+[M2-WEB] Next.js → http://localhost:3001
 ```
 
 Press `Ctrl+C` to stop all four.
 
 ---
 
-## Running Modules Individually
+## Available Scripts
 
-**Module 1:**
-```bash
-# Terminal 1 — FastAPI
-cd module-1-voice-interview
-uvicorn api.index:app --reload --port 8000
-
-# Terminal 2 — Next.js
-cd module-1-voice-interview
-npm run dev   # → http://localhost:3000
-```
-
-**Module 2:**
-```bash
-# Terminal 1 — FastAPI
-cd module-2-sentiment-chatbot
-uvicorn api.index:app --reload --port 8001
-
-# Terminal 2 — Next.js
-cd module-2-sentiment-chatbot
-npm run dev   # → http://localhost:3001
-```
+| Command | What it does |
+|---------|-------------|
+| `npm run dev` | Starts all 4 processes (2 × uvicorn + 2 × next dev) |
+| `npm run dev:m1-api` | Module 1 FastAPI only (port 8000) |
+| `npm run dev:m1-web` | Module 1 Next.js only (port 3000) |
+| `npm run dev:m2-api` | Module 2 FastAPI only (port 8001) |
+| `npm run dev:m2-web` | Module 2 Next.js only (port 3001) |
+| `npm run install:python` | Install Python deps for both modules |
+| `npm run build` | Build both Next.js apps for production |
 
 ---
 
-## How `/api` routing works
+## How `/api` Routing Works
 
 | Environment | How `/api/*` is routed |
 |-------------|------------------------|
 | **Local dev** | `next.config.js` `rewrites()` proxies to uvicorn (`:8000` or `:8001`) |
 | **Production (Vercel)** | `vercel.json` rewrites to the FastAPI ASGI app in `api/index.py` |
 
-The frontend always uses **relative `/api/...` paths** — no environment-specific URLs in the frontend code.
+The frontend always uses **relative `/api/...` paths** — no environment-specific URLs needed.
 
 ---
 
 ## API Reference
 
-### Module 1
+### Module 1 — Voice Interview Assistant
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/token` | Returns a short-lived ephemeral token for Gemini Live |
 | `POST` | `/api/summarize` | Accepts `{ transcript: [{role, text}] }`, returns `{ summary, themes }` |
 
-### Module 2
+### Module 2 — Sentiment Chatbot
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -156,8 +145,6 @@ cd module-2-sentiment-chatbot
 vercel   # same steps
 ```
 
-The `run-dev.sh` script is for local development only and has no effect on production.
-
 ---
 
 ## Tech Stack
@@ -168,5 +155,6 @@ The `run-dev.sh` script is for local development only and has no effect on produ
 | Backend | FastAPI (Python) |
 | AI | Google Gemini (`google-generativeai`) |
 | Styling | Plain CSS (no framework) |
-| Local runner | uvicorn + next dev |
+| Monorepo | npm workspaces + concurrently |
+| Local runner | uvicorn + next dev (via `npm run dev`) |
 | Production | Vercel (serverless Python + Edge) |
