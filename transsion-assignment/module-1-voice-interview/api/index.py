@@ -142,7 +142,7 @@ Return ONLY valid JSON, no markdown fences, no extra text.
 Include 3–7 key themes as short noun phrases."""
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-flash-latest")
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(

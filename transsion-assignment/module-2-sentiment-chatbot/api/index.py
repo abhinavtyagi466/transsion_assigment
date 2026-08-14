@@ -110,7 +110,7 @@ REVIEW:
 {body.review_text}"""
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-flash-latest")
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
