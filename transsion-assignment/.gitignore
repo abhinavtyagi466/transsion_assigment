@@ -27,5 +27,7 @@ env/
 .vercel/
 
 # OS
-.DS_Store
-Thumbs.db
+# Local Data
+data/
+*.json.bak
+
