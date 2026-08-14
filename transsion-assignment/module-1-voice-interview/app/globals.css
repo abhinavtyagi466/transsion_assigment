@@ -1,0 +1,265 @@
+/* ============================================================
+   Module 1 — Voice Interview Assistant — Global Styles
+   Plain CSS, no framework.
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-alt: #21262d;
+  --border: #30363d;
+  --accent: #238636;
+  --accent-hover: #2ea043;
+  --accent-danger: #da3633;
+  --accent-danger-hover: #f85149;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --user-bubble: #1c2a3a;
+  --assistant-bubble: #1a2332;
+  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --radius: 12px;
+  --radius-sm: 6px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px 64px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #58a6ff 0%, #79c0ff 50%, #a5d6ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+
+.header p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ── Status badge ───────────────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  margin-bottom: 24px;
+  font-size: 0.875rem;
+  width: 100%;
+  max-width: 720px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.status-dot.idle       { background: var(--text-muted); }
+.status-dot.connecting { background: #d29922; animation: pulse 1s infinite; }
+.status-dot.open       { background: var(--accent-hover); animation: pulse 1.5s infinite; }
+.status-dot.closed     { background: var(--text-muted); }
+.status-dot.error      { background: var(--accent-danger); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.status-label { color: var(--text-secondary); }
+.status-value { color: var(--text-primary); font-weight: 500; margin-left: auto; }
+
+/* ── Controls ───────────────────────────────────────────── */
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s, opacity 0.2s;
+  letter-spacing: 0.01em;
+}
+
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+.btn-start {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-start:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-stop {
+  background: var(--accent-danger);
+  color: #fff;
+}
+.btn-stop:hover:not(:disabled) { background: var(--accent-danger-hover); }
+
+/* ── Transcript panel ───────────────────────────────────── */
+.transcript-panel {
+  width: 100%;
+  max-width: 720px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 28px;
+  min-height: 260px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transcript-panel:empty::before {
+  content: 'Transcript will appear here once the interview starts…';
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.transcript-panel::-webkit-scrollbar { width: 6px; }
+.transcript-panel::-webkit-scrollbar-track { background: transparent; }
+.transcript-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.turn-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.turn-role.user      { color: #58a6ff; }
+.turn-role.assistant { color: #3fb950; }
+
+.turn-text {
+  background: var(--surface-alt);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.93rem;
+  color: var(--text-primary);
+  line-height: 1.55;
+  border-left: 3px solid transparent;
+}
+
+.turn.user      .turn-text { border-left-color: #58a6ff; }
+.turn.assistant .turn-text { border-left-color: #3fb950; }
+
+/* ── Summary panel ──────────────────────────────────────── */
+.summary-panel {
+  width: 100%;
+  max-width: 720px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.summary-panel h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+}
+
+.summary-text {
+  color: var(--text-secondary);
+  font-size: 0.93rem;
+  line-height: 1.7;
+  margin-bottom: 20px;
+  white-space: pre-wrap;
+}
+
+.themes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-tag {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.error-msg {
+  color: var(--accent-danger);
+  font-size: 0.875rem;
+  padding: 8px 0;
+}
+
+/* ── Loading spinner ────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

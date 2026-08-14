@@ -1,0 +1,295 @@
+/* ============================================================
+   Module 2 — Sentiment Chatbot — Global Styles
+   Plain CSS, no framework.
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-alt: #21262d;
+  --border: #30363d;
+  --accent: #1f6feb;
+  --accent-hover: #388bfd;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --positive: #3fb950;
+  --negative: #f85149;
+  --neutral: #d29922;
+  --user-bg: #1c2a3a;
+  --bot-bg: #161b22;
+  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --radius: 12px;
+  --radius-sm: 6px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px 64px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #f78166 0%, #ff7b72 50%, #ffa198 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+
+.header p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ── Chat history ───────────────────────────────────────── */
+.chat-window {
+  width: 100%;
+  max-width: 780px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+/* ── Single message bubble ──────────────────────────────── */
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeSlide 0.3s ease;
+}
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.message-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.message.user  .message-role { color: #58a6ff; }
+.message.bot   .message-role { color: #f78166; }
+
+.bubble {
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  font-size: 0.93rem;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+}
+
+.message.user .bubble {
+  background: var(--user-bg);
+  border-color: #1f6feb44;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.bot .bubble {
+  background: var(--bot-bg);
+  border-color: var(--border);
+}
+
+/* ── Aspect cards inside bot bubble ────────────────────── */
+.overall-sentiment {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.overall-sentiment strong {
+  color: var(--text-primary);
+}
+
+.aspects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aspect-card {
+  background: var(--surface-alt);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0 12px;
+  align-items: start;
+}
+
+.aspect-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.aspect-reasoning {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  grid-column: 1 / 3;
+  grid-row: 2;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.sentiment-badge {
+  grid-column: 3;
+  grid-row: 1;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.sentiment-badge.positive {
+  background: #1a3a22;
+  color: var(--positive);
+  border: 1px solid #2ea04344;
+}
+
+.sentiment-badge.negative {
+  background: #3a1c1c;
+  color: var(--negative);
+  border: 1px solid #f8514944;
+}
+
+.sentiment-badge.neutral {
+  background: #3a2f1a;
+  color: var(--neutral);
+  border: 1px solid #d2992244;
+}
+
+/* ── Input area ─────────────────────────────────────────── */
+.input-area {
+  width: 100%;
+  max-width: 780px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 0.93rem;
+  line-height: 1.6;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.review-textarea::placeholder { color: var(--text-muted); }
+.review-textarea:focus { border-color: var(--accent); }
+
+.input-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.char-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.btn-analyze {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 22px;
+  font-size: 0.93rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s, opacity 0.2s;
+}
+
+.btn-analyze:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-analyze:active:not(:disabled) { transform: scale(0.98); }
+.btn-analyze:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Spinner ────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error ──────────────────────────────────────────────── */
+.error-msg {
+  color: var(--negative);
+  font-size: 0.875rem;
+  padding: 8px 0;
+  width: 100%;
+  max-width: 780px;
+}
+
+/* ── Empty state ────────────────────────────────────────── */
+.empty-state {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 32px;
+  font-style: italic;
+}
