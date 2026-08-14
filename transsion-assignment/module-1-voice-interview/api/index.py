@@ -55,6 +55,57 @@ class SummarizeRequest(BaseModel):
     transcript: List[TranscriptTurn]
 
 
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: str = "en-US-natalie"
+
+
+# ── POST /api/tts ─────────────────────────────────────────────────────────────
+@app.post("/api/tts")
+async def generate_tts(body: TTSRequest):
+    """
+    Generates high quality TTS audio using Murf AI API.
+    Returns { "audio_url": "https://..." }
+    """
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Text is empty.")
+
+    murf_key = os.environ.get("MURF_API_KEY", "ap2_e992d841-3d08-48b6-ae69-7f6764b2bad0")
+    import urllib.request
+    import urllib.error
+
+    url = "https://api.murf.ai/v1/speech/generate"
+    payload = json.dumps({
+        "voiceId": body.voice_id,
+        "text": body.text.strip(),
+        "format": "MP3"
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "api-key": murf_key,
+                "Content-Type": "application/json"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            audio_url = data.get("audioFile")
+            if not audio_url:
+                raise HTTPException(status_code=502, detail=f"Murf AI error: {data}")
+            return {"audio_url": audio_url}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        logger.error("Murf AI error %s: %s", exc.code, detail)
+        raise HTTPException(status_code=exc.code, detail=detail) from exc
+    except Exception as exc:
+        logger.exception("Murf TTS error")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 # ── GET /api/token ────────────────────────────────────────────────────────────
 @app.get("/api/token")
 async def get_token():
@@ -103,6 +154,8 @@ async def get_token():
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         logger.error("Gemini token error %s: %s", exc.code, detail)
+        if exc.code in (400, 404):
+            return {"token": api_key}
         raise HTTPException(status_code=exc.code, detail=detail) from exc
     except Exception as exc:
         logger.exception("Unexpected error fetching token")

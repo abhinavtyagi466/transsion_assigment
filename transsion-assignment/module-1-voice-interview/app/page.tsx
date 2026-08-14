@@ -87,6 +87,26 @@ export default function VoiceInterviewPage() {
     }, 50);
   }, []);
 
+  // Helper to play Assistant response using Murf AI TTS API
+  const speakWithMurf = useCallback(async (text: string) => {
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice_id: "en-US-natalie" }),
+      });
+      if (res.ok) {
+        const { audio_url } = await res.json();
+        if (audio_url) {
+          const audio = new Audio(audio_url);
+          audio.play().catch((e) => console.log("Murf TTS playback info:", e));
+        }
+      }
+    } catch (err) {
+      console.error("Murf TTS error:", err);
+    }
+  }, []);
+
   /* ── 1. Start Interview ─────────────────────────────────── */
   const startInterview = useCallback(async () => {
     setError(null);
@@ -110,7 +130,7 @@ export default function VoiceInterviewPage() {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => {
+      ws.onopen = async () => {
         setConnState("open");
 
         // Send setup message
@@ -137,34 +157,90 @@ export default function VoiceInterviewPage() {
           })
         );
 
-        // d) Wire up microphone audio → WebSocket
-        const AudioContext =
+        // d) Wire up microphone audio → WebSocket using AudioWorkletNode (replaces deprecated ScriptProcessorNode)
+        const AudioContextClass =
           window.AudioContext || (window as unknown as { webkitAudioContext: typeof window.AudioContext }).webkitAudioContext;
-        const audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+        const audioCtx = new AudioContextClass({ sampleRate: SAMPLE_RATE });
         audioCtxRef.current = audioCtx;
 
         const source = audioCtx.createMediaStreamSource(stream);
-        // ScriptProcessorNode is deprecated but widely supported; fine for demo
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
 
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          const pcm = e.inputBuffer.getChannelData(0);
-          const b64 = float32ToInt16Base64(pcm);
-          ws.send(
-            JSON.stringify({
-              realtime_input: {
-                media_chunks: [
-                  { mime_type: "audio/pcm;rate=16000", data: b64 },
-                ],
-              },
-            })
-          );
-        };
+        if (audioCtx.audioWorklet) {
+          try {
+            const workletCode = `
+              class AudioInputProcessor extends AudioWorkletProcessor {
+                process(inputs) {
+                  const input = inputs[0];
+                  if (input && input[0]) {
+                    this.port.postMessage(new Float32Array(input[0]));
+                  }
+                  return true;
+                }
+              }
+              registerProcessor('audio-input-processor', AudioInputProcessor);
+            `;
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const workletUrl = URL.createObjectURL(blob);
+            await audioCtx.audioWorklet.addModule(workletUrl);
+            const workletNode = new AudioWorkletNode(audioCtx, 'audio-input-processor');
+            
+            workletNode.port.onmessage = (e) => {
+              if (ws.readyState !== WebSocket.OPEN) return;
+              const pcm = e.data;
+              const b64 = float32ToInt16Base64(pcm);
+              ws.send(
+                JSON.stringify({
+                  realtime_input: {
+                    media_chunks: [
+                      { mime_type: "audio/pcm;rate=16000", data: b64 },
+                    ],
+                  },
+                })
+              );
+            };
 
-        source.connect(processor);
-        processor.connect(audioCtx.destination);
+            source.connect(workletNode);
+            workletNode.connect(audioCtx.destination);
+          } catch {
+            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+            processorRef.current = processor;
+            processor.onaudioprocess = (evt) => {
+              if (ws.readyState !== WebSocket.OPEN) return;
+              const pcm = evt.inputBuffer.getChannelData(0);
+              const b64 = float32ToInt16Base64(pcm);
+              ws.send(
+                JSON.stringify({
+                  realtime_input: {
+                    media_chunks: [
+                      { mime_type: "audio/pcm;rate=16000", data: b64 },
+                    ],
+                  },
+                })
+              );
+            };
+            source.connect(processor);
+            processor.connect(audioCtx.destination);
+          }
+        } else {
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processorRef.current = processor;
+          processor.onaudioprocess = (evt) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const pcm = evt.inputBuffer.getChannelData(0);
+            const b64 = float32ToInt16Base64(pcm);
+            ws.send(
+              JSON.stringify({
+                realtime_input: {
+                  media_chunks: [
+                    { mime_type: "audio/pcm;rate=16000", data: b64 },
+                  ],
+                },
+              })
+            );
+          };
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+        }
       };
 
       // e) Handle incoming messages
@@ -182,7 +258,9 @@ export default function VoiceInterviewPage() {
             [];
           for (const part of parts) {
             if (part.text?.trim()) {
-              addTurn({ role: "assistant", text: part.text.trim() });
+              const assistantText = part.text.trim();
+              addTurn({ role: "assistant", text: assistantText });
+              speakWithMurf(assistantText);
             }
           }
 
