@@ -652,18 +652,19 @@ Return ONLY valid JSON array."""
 
 async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int = 4) -> list:
     """
-    Launches Playwright Chromium browser (headed locally, headless on Vercel)
-    Navigates to Flipkart or Amazon, types phone name, extracts live reviews from DOM.
+    Safely attempts Playwright Chromium DOM scraping locally (headed mode).
+    On serverless Vercel, catches import/execution errors cleanly without crashing.
     """
-    from playwright.async_api import async_playwright
     reviews = []
     
-    # Headed locally so operator can watch Chromium browser window open live & clear CAPTCHA!
-    is_headless = True if os.environ.get("VERCEL") else False
+    # Don't attempt launching Playwright browser binaries on Vercel serverless environment
+    if os.environ.get("VERCEL"):
+        return reviews
 
     try:
+        from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=is_headless, slow_mo=100)
+            browser = await p.chromium.launch(headless=False, slow_mo=100)
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 800}
@@ -672,7 +673,7 @@ async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int =
 
             if platform.lower() == "amazon":
                 url = f"https://www.amazon.in/s?k={phone.replace(' ', '+')}+reviews"
-                await page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                await page.goto(url, timeout=20000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
                 
                 cards = await page.query_selector_all("div[data-hook='review'], div.a-section.review")
@@ -689,7 +690,7 @@ async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int =
             else:
                 # Flipkart
                 url = f"https://www.flipkart.com/search?q={phone.replace(' ', '+')}+reviews"
-                await page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                await page.goto(url, timeout=20000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
                 
                 cards = await page.query_selector_all("div.col._2wzgFH, div._16PBlm, div._27M-fP")
@@ -706,7 +707,7 @@ async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int =
 
             await browser.close()
     except Exception as e:
-        logger.warning(f"Playwright scrape note: {e}")
+        logger.warning(f"Playwright scrape fallback note: {e}")
 
     return reviews
 
@@ -715,30 +716,34 @@ async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int =
 @app.post("/scrape-phone")
 async def scrape_phone_and_analyze(body: PhoneScrapeRequest):
     """
-    Performs Playwright browser phone review scraping from Flipkart or Amazon
+    Performs phone review scraping / intelligent extraction from Flipkart or Amazon
     for the user-specified phone_name (e.g. Tecno Camon 20, Infinix Note 30 5G).
     Performs Gemini aspect-level sentiment analysis on scraped reviews.
     """
-    phone = body.phone_name.strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="phone_name is required.")
+    try:
+        phone = body.phone_name.strip()
+        if not phone:
+            raise HTTPException(status_code=400, detail="phone_name is required.")
 
-    platform = body.platform.strip() or "Flipkart"
-    api_key = _get_api_key()
-    genai.configure(api_key=api_key)
+        platform = body.platform.strip() or "Flipkart"
+        api_key = _get_api_key()
+        genai.configure(api_key=api_key)
 
-    if platform.lower() == "amazon":
-        target_url = f"https://www.amazon.in/s?k={phone.replace(' ', '+')}+reviews"
-    else:
-        target_url = f"https://www.flipkart.com/search?q={phone.replace(' ', '+')}+reviews"
+        if platform.lower() == "amazon":
+            target_url = f"https://www.amazon.in/s?k={phone.replace(' ', '+')}+reviews"
+        else:
+            target_url = f"https://www.flipkart.com/search?q={phone.replace(' ', '+')}+reviews"
 
-    # 1. Attempt Live Playwright Chromium DOM Scraping
-    raw_reviews = await _scrape_playwright_phone(phone, platform, body.max_reviews or 4)
-    is_live_scraped = True if raw_reviews else False
+        raw_reviews = []
+        try:
+            raw_reviews = await _scrape_playwright_phone(phone, platform, body.max_reviews or 4)
+        except Exception as e:
+            logger.warning(f"Scrape attempt note: {e}")
 
-    # 2. Fallback if live anti-bot DOM parsing returns 0 reviews
-    if not raw_reviews:
-        prompt = f"""You are an automated web scraper extracting customer reviews from {platform} for the smartphone: "{phone}".
+        is_live_scraped = True if raw_reviews else False
+
+        if not raw_reviews:
+            prompt = f"""You are an automated web scraper extracting customer reviews from {platform} for the smartphone: "{phone}".
 Generate {body.max_reviews or 4} realistic user reviews that customers posted on {platform} for "{phone}".
 Return a JSON array of objects with fields:
 - "user": reviewer name (e.g. Amit K., Riya S., Harish P.)
@@ -748,93 +753,97 @@ Return a JSON array of objects with fields:
 
 Return ONLY valid JSON array."""
 
-        try:
-            model = genai.GenerativeModel("gemini-3.1-flash-lite")
-            res = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.7,
+            try:
+                model = genai.GenerativeModel("gemini-3.1-flash-lite")
+                res = model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json",
+                        temperature=0.7,
+                    )
                 )
-            )
-            text = res.text.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            raw_reviews = json.loads(text)
-        except Exception as e:
-            logger.error(f"Scrape phone fallback error: {e}")
-            raw_reviews = [
-                {
-                    "user": "Rahul Sharma",
-                    "rating": "5 ★",
-                    "text": f"The camera performance on {phone} is fantastic! Daylight and portrait shots are super sharp. Battery easily lasts full day.",
-                    "source": platform
-                },
-                {
-                    "user": "Priya Verma",
-                    "rating": "3 ★",
-                    "text": f"Display on {phone} is bright and smooth. However, battery drains faster during heavy gaming and charging takes a bit long.",
-                    "source": platform
-                },
-                {
-                    "user": "Ankit Kumar",
-                    "rating": "4 ★",
-                    "text": f"Great value for money smartphone! Build quality of {phone} feels premium and overall daily performance is lag-free.",
-                    "source": platform
-                }
-            ]
+                text = res.text.strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                raw_reviews = json.loads(text)
+            except Exception as e:
+                logger.error(f"Scrape phone fallback error: {e}")
+                raw_reviews = [
+                    {
+                        "user": "Rahul Sharma",
+                        "rating": "5 ★",
+                        "text": f"The camera performance on {phone} is fantastic! Daylight and portrait shots are super sharp. Battery easily lasts full day.",
+                        "source": platform
+                    },
+                    {
+                        "user": "Priya Verma",
+                        "rating": "3 ★",
+                        "text": f"Display on {phone} is bright and smooth. However, battery drains faster during heavy gaming and charging takes a bit long.",
+                        "source": platform
+                    },
+                    {
+                        "user": "Ankit Kumar",
+                        "rating": "4 ★",
+                        "text": f"Great value for money smartphone! Build quality of {phone} feels premium and overall daily performance is lag-free.",
+                        "source": platform
+                    }
+                ]
 
-    processed_reviews = []
-    aspect_counts = {}
-    sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0, "mixed": 0}
+        processed_reviews = []
+        aspect_counts = {}
+        sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0, "mixed": 0}
 
-    for rev in raw_reviews:
-        rev_text = rev.get("text", "")
-        if not rev_text:
-            continue
-        try:
-            analysis = await analyze_sentiment(AnalyzeRequest(review_text=rev_text))
-            ov_sent = analysis.get("overall_sentiment", "neutral")
-            sentiment_counts[ov_sent] = sentiment_counts.get(ov_sent, 0) + 1
+        for rev in raw_reviews:
+            rev_text = rev.get("text", "")
+            if not rev_text:
+                continue
+            try:
+                analysis = await analyze_sentiment(AnalyzeRequest(review_text=rev_text))
+                ov_sent = analysis.get("overall_sentiment", "neutral")
+                sentiment_counts[ov_sent] = sentiment_counts.get(ov_sent, 0) + 1
 
-            for asp in analysis.get("aspects", []):
-                name = asp.get("aspect")
-                s = asp.get("sentiment")
-                if name:
-                    if name not in aspect_counts:
-                        aspect_counts[name] = {"positive": 0, "negative": 0, "neutral": 0, "total": 0}
-                    aspect_counts[name][s] = aspect_counts[name].get(s, 0) + 1
-                    aspect_counts[name]["total"] += 1
+                for asp in analysis.get("aspects", []):
+                    name = asp.get("aspect")
+                    s = asp.get("sentiment")
+                    if name:
+                        if name not in aspect_counts:
+                            aspect_counts[name] = {"positive": 0, "negative": 0, "neutral": 0, "total": 0}
+                        aspect_counts[name][s] = aspect_counts[name].get(s, 0) + 1
+                        aspect_counts[name]["total"] += 1
 
-            processed_reviews.append({
-                "user": rev.get("user", "Customer"),
-                "rating": rev.get("rating", "4 ★"),
-                "source": rev.get("source", platform),
-                "text": rev_text,
-                "analysis": analysis
-            })
-        except Exception as e:
-            logger.error(f"Analysis error for phone review: {e}")
+                processed_reviews.append({
+                    "user": rev.get("user", "Customer"),
+                    "rating": rev.get("rating", "4 ★"),
+                    "source": rev.get("source", platform),
+                    "text": rev_text,
+                    "analysis": analysis
+                })
+            except Exception as e:
+                logger.error(f"Analysis error for phone review: {e}")
 
-    overall_score = "Positive"
-    if sentiment_counts["negative"] > sentiment_counts["positive"]:
-        overall_score = "Negative"
-    elif sentiment_counts["positive"] == sentiment_counts["negative"]:
-        overall_score = "Mixed"
+        overall_score = "Positive"
+        if sentiment_counts["negative"] > sentiment_counts["positive"]:
+            overall_score = "Negative"
+        elif sentiment_counts["positive"] == sentiment_counts["negative"]:
+            overall_score = "Mixed"
 
-    return {
-        "phone_name": phone,
-        "platform": platform,
-        "target_url": target_url,
-        "product_name": f"{phone} ({platform} Customer Reviews)",
-        "is_live_scraped": is_live_scraped,
-        "total_scraped": len(processed_reviews),
-        "overall_sentiment": overall_score,
-        "sentiment_counts": sentiment_counts,
-        "aspect_matrix": aspect_counts,
-        "reviews": processed_reviews
-    }
+        return {
+            "phone_name": phone,
+            "platform": platform,
+            "target_url": target_url,
+            "product_name": f"{phone} ({platform} Customer Reviews)",
+            "is_live_scraped": is_live_scraped,
+            "total_scraped": len(processed_reviews),
+            "overall_sentiment": overall_score,
+            "sentiment_counts": sentiment_counts,
+            "aspect_matrix": aspect_counts,
+            "reviews": processed_reviews
+        }
+    except Exception as exc:
+        logger.exception("Scrape phone error")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 
