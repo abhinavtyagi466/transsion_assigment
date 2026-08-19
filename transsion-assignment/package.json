@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n API,WEB -c blue,cyan \"python -m uvicorn api.index:app --reload --port 8000\" \"next dev -p 3000\"",
+    "dev": "concurrently -k -n API,WEB -c blue,cyan \"dotenv -e .env.local -- python -m uvicorn api.index:app --reload --port 8000\" \"next dev -p 3000\"",
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint"

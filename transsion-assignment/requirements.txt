@@ -1,3 +1,5 @@
 fastapi
 pydantic
 google-generativeai
+httpx
+beautifulsoup4
