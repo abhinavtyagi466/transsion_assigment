@@ -712,6 +712,68 @@ async def _scrape_playwright_phone(phone: str, platform: str, max_reviews: int =
     return reviews
 
 
+async def _scrape_live_http_phone(phone: str, platform: str, max_reviews: int = 4) -> list:
+    """
+    Scrapes REAL live customer reviews from Flipkart or Amazon via HTTP requests (works on Vercel serverless).
+    """
+    import httpx
+    from bs4 import BeautifulSoup
+
+    reviews = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    try:
+        if platform.lower() == "amazon":
+            url = f"https://www.amazon.in/s?k={phone.replace(' ', '+')}+reviews"
+            async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    cards = soup.select("div[data-hook='review'], div.a-section.review")
+                    for card in cards[:max_reviews]:
+                        body_el = card.select_one("span[data-hook='review-body'], span.review-text")
+                        user_el = card.select_one("span.a-profile-name")
+                        rating_el = card.select_one("i[data-hook='review-star-rating'] span, span.a-icon-alt")
+                        if body_el:
+                            text = body_el.get_text().strip()
+                            if text:
+                                reviews.append({
+                                    "user": user_el.get_text().strip() if user_el else "Amazon Customer",
+                                    "rating": rating_el.get_text().strip() if rating_el else "5 ★",
+                                    "text": text,
+                                    "source": "Amazon (Live Scraped)"
+                                })
+        else:
+            # Flipkart
+            url = f"https://www.flipkart.com/search?q={phone.replace(' ', '+')}+reviews"
+            async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    cards = soup.select("div.col._2wzgFH, div._16PBlm, div._27M-fP")
+                    for card in cards[:max_reviews]:
+                        body_el = card.select_one("div.t-ZTKy, div._2-N8zT, div.ZvHmBo")
+                        user_el = card.select_one("p._2sc7ZR, span._2sc7ZR")
+                        rating_el = card.select_one("div._3LWZlK, div._1BLA3n")
+                        if body_el:
+                            text = body_el.get_text().strip()
+                            if text:
+                                reviews.append({
+                                    "user": user_el.get_text().strip() if user_el else "Verified Buyer",
+                                    "rating": rating_el.get_text().strip() + " ★" if rating_el else "5 ★",
+                                    "text": text,
+                                    "source": "Flipkart (Live Scraped)"
+                                })
+    except Exception as e:
+        logger.warning(f"HTTP live scrape note: {e}")
+
+    return reviews
+
+
 @app.post("/api/scrape-phone")
 @app.post("/scrape-phone")
 async def scrape_phone_and_analyze(body: PhoneScrapeRequest):
@@ -735,10 +797,19 @@ async def scrape_phone_and_analyze(body: PhoneScrapeRequest):
             target_url = f"https://www.flipkart.com/search?q={phone.replace(' ', '+')}+reviews"
 
         raw_reviews = []
+        
+        # 1. Try Playwright Chromium DOM Scraping (Local machine headed mode)
         try:
             raw_reviews = await _scrape_playwright_phone(phone, platform, body.max_reviews or 4)
         except Exception as e:
-            logger.warning(f"Scrape attempt note: {e}")
+            logger.warning(f"Playwright scrape attempt note: {e}")
+
+        # 2. Try HTTP Live Web Scraping via httpx + BeautifulSoup (Vercel serverless compatible)
+        if not raw_reviews:
+            try:
+                raw_reviews = await _scrape_live_http_phone(phone, platform, body.max_reviews or 4)
+            except Exception as e:
+                logger.warning(f"HTTP live scrape attempt note: {e}")
 
         is_live_scraped = True if raw_reviews else False
 
