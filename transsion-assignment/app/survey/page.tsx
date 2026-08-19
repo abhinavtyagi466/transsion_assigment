@@ -1,11 +1,29 @@
 "use client";
 
 /**
- * Module 1 — Voice Interview Assistant & Admin Dashboard
+ * Module 1 — Voice Interview Assistant & Admin Dashboard (Clean Icon UI)
  */
 
 import { useRef, useState, useCallback } from "react";
 import Link from "next/link";
+import {
+  Mic,
+  MicOff,
+  Play,
+  Square,
+  Lock,
+  Unlock,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  ArrowLeft,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Volume2,
+  Sparkles,
+  User
+} from "lucide-react";
 
 /* ── Types ─────────────────────────────────────────────── */
 type Turn = { role: "user" | "assistant"; text: string };
@@ -148,107 +166,87 @@ export default function VoiceInterviewPage() {
 
   const startListening = useCallback(() => {
     if (!isActiveRef.current) return;
-
-    const SpeechRecognition =
-      (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionInstance }).SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionInstance }).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setError("Your browser does not support Speech Recognition. Please use Chrome.");
+    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
+      setError("Web Speech API is not supported in this browser. Please use Chrome.");
       setSessionState("error");
       return;
     }
+    const SpeechRecognitionAPI =
+      (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionInstance }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionInstance }).webkitSpeechRecognition;
 
-    const recognition = new SpeechRecognition();
+    if (!SpeechRecognitionAPI) return;
+
+    const recognition = new SpeechRecognitionAPI();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognitionRef.current = recognition;
 
     recognition.onstart = () => {
-      setSessionState("listening");
-      setInterimText("");
+      if (isActiveRef.current) setSessionState("listening");
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = "";
-      let finalText = "";
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          finalText += result[0].transcript;
+          const userText = result[0].transcript.trim();
+          if (userText && !isProcessingRef.current) {
+            isProcessingRef.current = true;
+            setInterimText("");
+            const updatedConv = addTurn({ role: "user", text: userText });
+            getInterviewerResponse(updatedConv).then(async (aiText) => {
+              if (aiText && isActiveRef.current) {
+                addTurn({ role: "assistant", text: aiText });
+                await speakWithMurf(aiText);
+              }
+              isProcessingRef.current = false;
+              if (isActiveRef.current) startListening();
+            });
+          }
         } else {
           interim += result[0].transcript;
         }
       }
-
-      if (interim) setInterimText(interim);
-
-      if (finalText.trim() && !isProcessingRef.current) {
-        isProcessingRef.current = true;
-        setInterimText("");
-        try {
-          recognition.stop();
-        } catch (_) {}
-
-        const userTurn: Turn = { role: "user", text: finalText.trim() };
-        const updatedConversation = addTurn(userTurn);
-
-        getInterviewerResponse(updatedConversation).then(async (response) => {
-          if (response && isActiveRef.current) {
-            const assistantTurn: Turn = { role: "assistant", text: response };
-            addTurn(assistantTurn);
-            await speakWithMurf(response);
-          }
-          isProcessingRef.current = false;
-          if (isActiveRef.current) {
-            startListening();
-          }
-        }).catch(() => {
-          isProcessingRef.current = false;
-        });
-      }
+      setInterimText(interim);
     };
 
     recognition.onerror = (event: { error: string }) => {
-      if (event.error === "no-speech" && isActiveRef.current && !isProcessingRef.current) {
-        setTimeout(() => {
-          if (isActiveRef.current && !isProcessingRef.current) startListening();
-        }, 300);
-        return;
+      if (event.error === "no-speech" && isActiveRef.current) {
+        try { recognition.stop(); } catch {}
+        setTimeout(() => { if (isActiveRef.current) startListening(); }, 300);
       }
-      if (event.error === "aborted") return;
-      console.error("Speech recognition error:", event.error);
     };
 
-    recognition.onend = () => {};
+    recognition.onend = () => {
+      if (isActiveRef.current && sessionState === "listening" && !isProcessingRef.current) {
+        setTimeout(() => { if (isActiveRef.current) startListening(); }, 300);
+      }
+    };
 
-    recognition.start();
-  }, [addTurn, getInterviewerResponse, speakWithMurf]);
+    try { recognition.start(); } catch {}
+  }, [addTurn, getInterviewerResponse, sessionState, speakWithMurf]);
 
   const startInterview = useCallback(async () => {
     setError(null);
     setSummary(null);
     setTranscript([]);
     transcriptRef.current = [];
-    isProcessingRef.current = false;
     isActiveRef.current = true;
+    isProcessingRef.current = true;
+
     setSessionState("thinking");
 
     const greeting = await getInterviewerResponse([]);
-    if (greeting) {
-      const greetingTurn: Turn = { role: "assistant", text: greeting };
-      addTurn(greetingTurn);
-      await speakWithMurf(greeting);
-      if (isActiveRef.current) {
-        startListening();
-      }
-    } else {
-      setError("Could not connect to interview service.");
-      setSessionState("error");
-      isActiveRef.current = false;
-    }
+    const firstQuestion = greeting || "Hello! Thanks for joining this survey. May I please have your full name?";
+
+    addTurn({ role: "assistant", text: firstQuestion });
+    await speakWithMurf(firstQuestion);
+    isProcessingRef.current = false;
+
+    if (isActiveRef.current) startListening();
   }, [addTurn, getInterviewerResponse, speakWithMurf, startListening]);
 
   const stopInterview = useCallback(async () => {
@@ -324,9 +322,9 @@ export default function VoiceInterviewPage() {
   const isActive = sessionState === "listening" || sessionState === "thinking" || sessionState === "speaking";
   const stateLabels: Record<SessionState, string> = {
     idle: "Idle — ready to start",
-    listening: "🎙 Listening to you…",
-    thinking: "🤔 Interviewer is thinking…",
-    speaking: "🔊 Interviewer is speaking…",
+    listening: "Listening to you…",
+    thinking: "Interviewer is thinking…",
+    speaking: "Interviewer is speaking…",
     closed: "Session ended",
     error: "Error occurred",
   };
@@ -334,11 +332,13 @@ export default function VoiceInterviewPage() {
   return (
     <main className="page">
       <div className="nav-back">
-        <Link href="/" className="back-btn">← Back to Platform Hub</Link>
+        <Link href="/" className="back-btn">
+          <ArrowLeft size={16} style={{ marginRight: 6 }} /> Back to Platform Hub
+        </Link>
       </div>
 
       <header className="header">
-        <h1>🎙 Voice Survey Agent</h1>
+        <h1>Voice Survey Agent</h1>
         <p>Interactive voice interview assistant powered by Gemini 3.1 &amp; Murf TTS</p>
         <button
           className="admin-toggle-btn"
@@ -346,8 +346,17 @@ export default function VoiceInterviewPage() {
             setIsAdminView(!isAdminView);
             if (!isAdminView && adminAuth) fetchSavedTranscripts();
           }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
         >
-          {isAdminView ? "← Back to Interview" : "🔐 Admin Dashboard & Transcripts"}
+          {isAdminView ? (
+            <>
+              <ArrowLeft size={16} /> Back to Interview
+            </>
+          ) : (
+            <>
+              <Lock size={16} /> Admin Dashboard &amp; Transcripts
+            </>
+          )}
         </button>
       </header>
 
@@ -356,7 +365,10 @@ export default function VoiceInterviewPage() {
         <section className="admin-container">
           {!adminAuth ? (
             <div className="admin-login-box">
-              <h2>🔒 Admin Authentication</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <Lock size={24} color="#58a6ff" />
+                <h2 style={{ margin: 0 }}>Admin Authentication</h2>
+              </div>
               <p>Enter password to view user transcripts saved in Supabase.</p>
               <form onSubmit={handleAdminLogin}>
                 <input
@@ -368,17 +380,24 @@ export default function VoiceInterviewPage() {
                   required
                 />
                 <button type="submit" className="btn btn-start" style={{ width: "100%", justifyContent: "center" }}>
-                  Unlock Admin Dashboard
+                  <Unlock size={16} style={{ marginRight: 6 }} /> Unlock Admin Dashboard
                 </button>
               </form>
-              {adminError && <p className="error-msg" style={{ marginTop: 12 }}>⚠ {adminError}</p>}
+              {adminError && (
+                <p className="error-msg" style={{ marginTop: 12 }}>
+                  <AlertCircle size={16} style={{ marginRight: 6 }} /> {adminError}
+                </p>
+              )}
             </div>
           ) : (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <h2>📁 Saved User Transcripts ({savedInterviews.length})</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <FileText size={20} color="#58a6ff" />
+                  <h2 style={{ margin: 0 }}>Saved User Transcripts ({savedInterviews.length})</h2>
+                </div>
                 <button className="btn" onClick={fetchSavedTranscripts} style={{ padding: "6px 14px", fontSize: "0.85rem", background: "var(--surface-alt)" }}>
-                  🔄 Refresh
+                  <RefreshCw size={14} style={{ marginRight: 6 }} /> Refresh
                 </button>
               </div>
 
@@ -401,20 +420,20 @@ export default function VoiceInterviewPage() {
                           onClick={() => setExpandedInterviewId(isExpanded ? null : item.id)}
                         >
                           <div>
-                            <h3 style={{ fontSize: "1.05rem" }}>
-                              Transcript for {item.user_name || "Participant"}
+                            <h3 style={{ fontSize: "1.05rem", display: "flex", alignItems: "center", gap: 6 }}>
+                              <User size={16} color="#58a6ff" /> Transcript for {item.user_name || "Participant"}
                             </h3>
                             <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{formattedDate}</span>
                           </div>
                           <span style={{ fontSize: "1.2rem", color: "var(--text-secondary)" }}>
-                            {isExpanded ? "▲" : "▼"}
+                            {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                           </span>
                         </div>
 
                         {isExpanded && (
                           <div className="transcript-card-body">
                             <div style={{ marginBottom: 16 }}>
-                              <h4 style={{ marginBottom: 6 }}>Summary</h4>
+                              <h4 style={{ marginBottom: 6, color: "#ffffff" }}>Summary</h4>
                               <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: 12 }}>{item.summary}</p>
 
                               {item.themes && item.themes.length > 0 && (
@@ -426,7 +445,7 @@ export default function VoiceInterviewPage() {
                               )}
                             </div>
 
-                            <h4 style={{ marginBottom: 8 }}>Full Dialogue Transcript</h4>
+                            <h4 style={{ marginBottom: 8, color: "#ffffff" }}>Full Dialogue Transcript</h4>
                             <div className="transcript-dialogue">
                               {item.transcript && item.transcript.map((t, idx) => (
                                 <div key={idx} className={`turn ${t.role}`} style={{ marginBottom: 8 }}>
@@ -453,7 +472,11 @@ export default function VoiceInterviewPage() {
           <div className="status-bar" role="status" aria-live="polite">
             <span className={`status-dot ${sessionState}`} aria-hidden="true" />
             <span className="status-label">Status:</span>
-            <span className="status-value">{stateLabels[sessionState]}</span>
+            <span className="status-value" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {sessionState === "listening" && <Mic size={14} color="#58a6ff" />}
+              {sessionState === "speaking" && <Volume2 size={14} color="#3fb950" />}
+              {stateLabels[sessionState]}
+            </span>
           </div>
 
           <div className="controls">
@@ -469,7 +492,9 @@ export default function VoiceInterviewPage() {
                   Starting…
                 </>
               ) : (
-                "▶ Start Interview"
+                <>
+                  <Play size={16} style={{ marginRight: 6 }} /> Start Interview
+                </>
               )}
             </button>
 
@@ -479,11 +504,15 @@ export default function VoiceInterviewPage() {
               onClick={stopInterview}
               disabled={!isActive}
             >
-              ⏹ Stop &amp; Summarize
+              <Square size={16} style={{ marginRight: 6 }} /> Stop &amp; Summarize
             </button>
           </div>
 
-          {error && <p className="error-msg" role="alert">⚠ {error}</p>}
+          {error && (
+            <p className="error-msg" role="alert">
+              <AlertCircle size={16} style={{ marginRight: 6 }} /> {error}
+            </p>
+          )}
 
           <section className="transcript-panel">
             {transcript.map((turn, i) => (
@@ -514,11 +543,13 @@ export default function VoiceInterviewPage() {
 
           {summary && !summaryLoading && (
             <section className="summary-panel">
-              <h2>📋 Interview Summary ({summary.user_name || "Participant"})</h2>
+              <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <FileText size={20} color="#58a6ff" /> Interview Summary ({summary.user_name || "Participant"})
+              </h2>
               <p className="summary-text">{summary.summary}</p>
               {summary.themes.length > 0 && (
                 <>
-                  <h2 style={{ marginBottom: 10 }}>🏷 Key Themes</h2>
+                  <h2 style={{ marginBottom: 10, marginTop: 16 }}>Key Themes</h2>
                   <div className="themes-list">
                     {summary.themes.map((theme, i) => (
                       <span key={i} className="theme-tag">
@@ -528,8 +559,8 @@ export default function VoiceInterviewPage() {
                   </div>
                 </>
               )}
-              <p style={{ marginTop: 16, fontSize: "0.82rem", color: "#3fb950" }}>
-                ✓ Transcript saved to database for {summary.user_name || "Participant"}.
+              <p style={{ marginTop: 16, fontSize: "0.82rem", color: "#3fb950", display: "flex", alignItems: "center", gap: 6 }}>
+                <CheckCircle2 size={16} /> Transcript saved to database for {summary.user_name || "Participant"}.
               </p>
             </section>
           )}

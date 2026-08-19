@@ -1,11 +1,30 @@
 "use client";
 
 /**
- * Module 2 — Sentiment Chatbot Page & Human-in-the-Loop Web Scraper
+ * Module 2 — Sentiment Chatbot Page & Human-in-the-Loop Web Scraper (Clean Icon UI)
  */
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import {
+  Globe,
+  MessageSquare,
+  Search,
+  ShieldCheck,
+  CheckCircle2,
+  ThumbsUp,
+  ThumbsDown,
+  Minus,
+  ShoppingCart,
+  ArrowLeft,
+  Bot,
+  Sparkles,
+  Smartphone,
+  AlertCircle,
+  X,
+  RefreshCw,
+  BarChart2
+} from "lucide-react";
 
 interface Aspect {
   aspect: string;
@@ -31,6 +50,7 @@ interface ScrapeResult {
   url?: string;
   platform: string;
   product_name: string;
+  is_live_scraped?: boolean;
   total_scraped: number;
   overall_sentiment: string;
   sentiment_counts: { positive: number; negative: number; neutral: number; mixed: number };
@@ -47,10 +67,10 @@ interface ChatMessage {
   result?: AnalyzeResponse;
 }
 
-function sentimentEmoji(s: string): string {
-  if (s === "positive") return "😊";
-  if (s === "negative") return "😞";
-  return "😐";
+function SentimentIcon({ sentiment }: { sentiment: string }) {
+  if (sentiment === "positive") return <ThumbsUp size={14} className="text-green" />;
+  if (sentiment === "negative") return <ThumbsDown size={14} className="text-red" />;
+  return <Minus size={14} className="text-muted" />;
 }
 
 export default function SentimentChatbotPage() {
@@ -124,7 +144,7 @@ export default function SentimentChatbotPage() {
   function handleLaunchScraper() {
     if (!phoneName.trim()) return;
     setErrorScrape(null);
-    setShowCaptchaModal(true); // Open Human CAPTCHA clearance popup
+    setShowCaptchaModal(true);
   }
 
   /* ── 3. Execute Scrape Post-CAPTCHA Clearance ───────── */
@@ -167,11 +187,13 @@ export default function SentimentChatbotPage() {
   return (
     <main className="page">
       <div className="nav-back">
-        <Link href="/" className="back-btn">← Back to Platform Hub</Link>
+        <Link href="/" className="back-btn">
+          <ArrowLeft size={16} style={{ marginRight: 6 }} /> Back to Platform Hub
+        </Link>
       </div>
 
       <header className="header">
-        <h1>📊 Sentiment Analysis Bot</h1>
+        <h1>Sentiment Analysis Bot</h1>
         <p>
           Interactive Human-in-the-Loop Scraper &amp; Aspect-Level Sentiment Analysis
         </p>
@@ -188,7 +210,7 @@ export default function SentimentChatbotPage() {
               fontSize: "0.88rem"
             }}
           >
-            🕷️ Scrape Phone Reviews
+            <Globe size={16} style={{ marginRight: 6 }} /> Scrape Phone Reviews
           </button>
           <button
             onClick={() => setActiveTab("text")}
@@ -200,7 +222,7 @@ export default function SentimentChatbotPage() {
               fontSize: "0.88rem"
             }}
           >
-            💬 Single Review Text
+            <MessageSquare size={16} style={{ marginRight: 6 }} /> Single Review Text
           </button>
         </div>
       </header>
@@ -209,7 +231,10 @@ export default function SentimentChatbotPage() {
       {activeTab === "scraper" && (
         <section style={{ width: "100%", maxWidth: 720 }}>
           <div className="admin-container" style={{ marginBottom: 20 }}>
-            <h2 style={{ fontSize: "1.2rem", marginBottom: 6 }}>🤖 Agent Scraper Control Panel</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <Bot size={20} color="#58a6ff" />
+              <h2 style={{ fontSize: "1.2rem", margin: 0 }}>Agent Scraper Control Panel</h2>
+            </div>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.88rem", marginBottom: 20 }}>
               Enter any smartphone model name and select a platform. The agent will navigate to the site, prompt for CAPTCHA verification, search for the phone, extract reviews, and run Gemini aspect sentiment analysis.
             </p>
@@ -220,14 +245,17 @@ export default function SentimentChatbotPage() {
                 <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", display: "block", marginBottom: 6, fontWeight: 600 }}>
                   1. Phone Model Name:
                 </label>
-                <input
-                  type="text"
-                  className="admin-input"
-                  style={{ marginBottom: 0 }}
-                  placeholder="e.g. Tecno Camon 20 Pro, Infinix Note 30, itel P55 5G, iPhone 14..."
-                  value={phoneName}
-                  onChange={(e) => setPhoneName(e.target.value)}
-                />
+                <div style={{ position: "relative" }}>
+                  <Smartphone size={18} style={{ position: "absolute", left: 12, top: 12, color: "var(--text-muted)" }} />
+                  <input
+                    type="text"
+                    className="admin-input"
+                    style={{ marginBottom: 0, paddingLeft: 38 }}
+                    placeholder="e.g. Tecno Camon 20 Pro, Infinix Note 30, itel P55 5G, iPhone 16..."
+                    value={phoneName}
+                    onChange={(e) => setPhoneName(e.target.value)}
+                  />
+                </div>
               </div>
 
               <div>
@@ -247,7 +275,7 @@ export default function SentimentChatbotPage() {
                     }}
                     onClick={() => setSelectedPlatform("Flipkart")}
                   >
-                    🛒 Flipkart
+                    <ShoppingCart size={16} style={{ marginRight: 6 }} /> Flipkart
                   </button>
                   <button
                     type="button"
@@ -261,7 +289,7 @@ export default function SentimentChatbotPage() {
                     }}
                     onClick={() => setSelectedPlatform("Amazon")}
                   >
-                    🛒 Amazon
+                    <ShoppingCart size={16} style={{ marginRight: 6 }} /> Amazon
                   </button>
                 </div>
               </div>
@@ -278,12 +306,18 @@ export default function SentimentChatbotPage() {
                     Agent Navigating &amp; Scraping…
                   </>
                 ) : (
-                  `🚀 Launch Agent on ${selectedPlatform}`
+                  <>
+                    <Search size={18} style={{ marginRight: 6 }} /> Launch Agent on {selectedPlatform}
+                  </>
                 )}
               </button>
             </div>
 
-            {errorScrape && <p className="error-msg" style={{ marginTop: 14 }}>⚠ {errorScrape}</p>}
+            {errorScrape && (
+              <p className="error-msg" style={{ marginTop: 14 }}>
+                <AlertCircle size={16} style={{ marginRight: 6, inlineSize: "fit-content" }} /> {errorScrape}
+              </p>
+            )}
           </div>
 
           {/* Loading status */}
@@ -316,8 +350,8 @@ export default function SentimentChatbotPage() {
 
                   <div style={{ textAlign: "right" }}>
                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", display: "block" }}>Overall Score</span>
-                    <span className={`sentiment-badge ${scrapeResult.overall_sentiment.toLowerCase()}`} style={{ fontSize: "1rem", padding: "4px 14px", borderRadius: 16 }}>
-                      {sentimentEmoji(scrapeResult.overall_sentiment.toLowerCase())} {scrapeResult.overall_sentiment}
+                    <span className={`sentiment-badge ${scrapeResult.overall_sentiment.toLowerCase()}`} style={{ fontSize: "0.95rem", padding: "4px 14px", borderRadius: 16 }}>
+                      {scrapeResult.overall_sentiment}
                     </span>
                   </div>
                 </div>
@@ -325,15 +359,24 @@ export default function SentimentChatbotPage() {
                 {/* Aspect Matrix breakdown */}
                 {Object.keys(scrapeResult.aspect_matrix).length > 0 && (
                   <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-                    <h4 style={{ fontSize: "0.95rem", marginBottom: 12, color: "#ffffff" }}>🏷 Aspect Sentiment Matrix</h4>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                      <BarChart2 size={16} color="#58a6ff" />
+                      <h4 style={{ fontSize: "0.95rem", margin: 0, color: "#ffffff" }}>Aspect Sentiment Matrix</h4>
+                    </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
                       {Object.entries(scrapeResult.aspect_matrix).map(([aspName, counts]) => (
                         <div key={aspName} className="aspect-card" style={{ background: "var(--surface-alt)" }}>
                           <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#ffffff" }}>{aspName}</span>
                           <div style={{ display: "flex", gap: 10, fontSize: "0.8rem", marginTop: 6 }}>
-                            <span style={{ color: "#3fb950" }}>👍 {counts.positive}</span>
-                            <span style={{ color: "#f85149" }}>👎 {counts.negative}</span>
-                            <span style={{ color: "#a0a0a0" }}>😐 {counts.neutral}</span>
+                            <span style={{ color: "#3fb950", display: "flex", alignItems: "center", gap: 4 }}>
+                              <ThumbsUp size={12} /> {counts.positive}
+                            </span>
+                            <span style={{ color: "#f85149", display: "flex", alignItems: "center", gap: 4 }}>
+                              <ThumbsDown size={12} /> {counts.negative}
+                            </span>
+                            <span style={{ color: "#a0a0a0", display: "flex", alignItems: "center", gap: 4 }}>
+                              <Minus size={12} /> {counts.neutral}
+                            </span>
                           </div>
                         </div>
                       ))}
@@ -344,7 +387,10 @@ export default function SentimentChatbotPage() {
 
               {/* Scraped Reviews Feed */}
               <div className="summary-panel">
-                <h3 style={{ fontSize: "1.1rem", marginBottom: 14 }}>💬 Scraped Customer Reviews ({scrapeResult.reviews.length})</h3>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <MessageSquare size={18} color="#58a6ff" />
+                  <h3 style={{ fontSize: "1.1rem", margin: 0 }}>Scraped Customer Reviews ({scrapeResult.reviews.length})</h3>
+                </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   {scrapeResult.reviews.map((rev, i) => (
                     <div key={i} className="transcript-card" style={{ background: "var(--surface-alt)", padding: 16 }}>
@@ -366,11 +412,13 @@ export default function SentimentChatbotPage() {
                         <div className="aspects-list">
                           {rev.analysis.aspects.map((asp, idx) => (
                             <div key={idx} style={{ fontSize: "0.82rem", background: "var(--bg)", padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}>
-                              <span style={{ fontWeight: 600, marginRight: 6 }}>{asp.aspect}:</span>
-                              <span className={`sentiment-badge ${asp.sentiment}`} style={{ fontSize: "0.7rem", padding: "1px 6px" }}>
-                                {asp.sentiment}
-                              </span>
-                              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 2 }}>{asp.reasoning}</p>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                <span style={{ fontWeight: 600, color: "#ffffff" }}>{asp.aspect}</span>
+                                <span className={`sentiment-badge ${asp.sentiment}`} style={{ fontSize: "0.7rem", padding: "1px 6px" }}>
+                                  {asp.sentiment}
+                                </span>
+                              </div>
+                              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: 0 }}>{asp.reasoning}</p>
                             </div>
                           ))}
                         </div>
@@ -406,10 +454,11 @@ export default function SentimentChatbotPage() {
                   <div className="bubble">
                     {msg.result && (
                       <>
-                        <div style={{ marginBottom: 12 }}>
+                        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
                           <strong>Overall Sentiment:</strong>{" "}
-                          {sentimentEmoji(msg.result.overall_sentiment)}{" "}
-                          <span style={{ textTransform: "capitalize" }}>{msg.result.overall_sentiment}</span>
+                          <span className={`sentiment-badge ${msg.result.overall_sentiment}`} style={{ textTransform: "capitalize" }}>
+                            {msg.result.overall_sentiment}
+                          </span>
                         </div>
                         <div className="aspects-list">
                           {msg.result.aspects.map((a, i) => (
@@ -417,7 +466,7 @@ export default function SentimentChatbotPage() {
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                 <span className="aspect-name">{a.aspect}</span>
                                 <span className={`sentiment-badge ${a.sentiment}`}>
-                                  {sentimentEmoji(a.sentiment)} {a.sentiment}
+                                  {a.sentiment}
                                 </span>
                               </div>
                               <p className="aspect-reasoning">{a.reasoning}</p>
@@ -444,7 +493,11 @@ export default function SentimentChatbotPage() {
             <div ref={bottomRef} />
           </div>
 
-          {errorText && <p className="error-msg" role="alert">⚠ {errorText}</p>}
+          {errorText && (
+            <p className="error-msg" role="alert">
+              <AlertCircle size={16} style={{ marginRight: 6 }} /> {errorText}
+            </p>
+          )}
 
           <div className="input-area">
             <textarea
@@ -470,7 +523,9 @@ export default function SentimentChatbotPage() {
                     Analysing…
                   </>
                 ) : (
-                  "🔍 Analyze Sentiment"
+                  <>
+                    <Search size={16} style={{ marginRight: 6 }} /> Analyze Sentiment
+                  </>
                 )}
               </button>
             </div>
@@ -507,9 +562,9 @@ export default function SentimentChatbotPage() {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <span style={{ fontSize: "1.8rem" }}>🛡️</span>
+              <ShieldCheck size={28} color="#58a6ff" />
               <div>
-                <h3 style={{ fontSize: "1.15rem", color: "#ffffff" }}>Human Verification Check</h3>
+                <h3 style={{ fontSize: "1.15rem", color: "#ffffff", margin: 0 }}>Human Verification Check</h3>
                 <span style={{ fontSize: "0.8rem", color: "#58a6ff" }}>Agent navigating to {selectedPlatform}</span>
               </div>
             </div>
@@ -518,13 +573,13 @@ export default function SentimentChatbotPage() {
               <p style={{ fontSize: "0.9rem", color: "var(--text-primary)", marginBottom: 8 }}>
                 Agent is opening <strong>{selectedPlatform}</strong> and entering phone name:
               </p>
-              <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "#3fb950" }}>
+              <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "#3fb950", margin: 0 }}>
                 "{phoneName}"
               </p>
             </div>
 
             <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.5 }}>
-              ⚠ If CAPTCHA or bot verification is required by {selectedPlatform}, please clear it. Once verified, click below to signal the agent to resume scraping and analyze customer reviews.
+              If CAPTCHA or bot verification is required by {selectedPlatform}, please clear it. Once verified, click below to signal the agent to resume scraping and analyze customer reviews.
             </p>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -534,7 +589,7 @@ export default function SentimentChatbotPage() {
                 style={{ flex: 1, justifyContent: "center", padding: "12px", background: "#3fb950", color: "#ffffff" }}
                 onClick={executeScrapeAfterCaptcha}
               >
-                ✅ Clear CAPTCHA &amp; Resume Agent
+                <CheckCircle2 size={18} style={{ marginRight: 6 }} /> Clear CAPTCHA &amp; Resume Agent
               </button>
               <button
                 type="button"
